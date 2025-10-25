@@ -48,6 +48,30 @@ body {
   @apply w-full bg-white border-2 border-gray-200 rounded-2xl px-6 py-5 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-400 transition-all duration-300;
 }
 
+/* Custom Select/Dropdown Styling */
+select.input-field {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23374151' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1.5rem center;
+  background-size: 1.25rem;
+  padding-right: 4rem;
+}
+
+select.input-field:hover {
+  @apply border-gray-300 bg-gray-50;
+}
+
+select.input-field:focus {
+  @apply border-gray-900;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.05);
+}
+
+/* Style the dropdown options */
+select.input-field option {
+  @apply bg-white text-gray-900 py-3;
+  font-weight: 500;
+}
+
 .tab-button {
   @apply px-8 py-4 rounded-full font-semibold transition-all duration-500;
 }

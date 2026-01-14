@@ -1,9 +1,9 @@
 export type Mode = 'video' | 'audio'
-export type AudioFormat = 'mp3' | 'm4a'
+export type AudioFormat = 'wav' | 'mp3' | 'm4a'
 
 export const API_BASE = import.meta.env.VITE_API_BASE || ''
 
-export async function createJob(params: { url: string; mode: Mode; quality?: string; audio_format?: AudioFormat }) {
+export async function createJob(params: { url: string; mode: Mode; quality?: string; audio_format?: AudioFormat; start_time?: string; end_time?: string }) {
   const base = API_BASE
   const res = await fetch(`${base}/api/jobs`, {
     method: 'POST',
@@ -34,4 +34,21 @@ export function toAbsoluteDownloadUrl(relative: string) {
   if (API_BASE) return `${API_BASE}${relative}`
   const origin = window.location.origin
   return `${origin}${relative}`
+}
+
+export type VideoInfo = {
+  title: string
+  duration: number  // in seconds
+  thumbnail: string
+}
+
+export async function getVideoInfo(url: string): Promise<VideoInfo> {
+  const base = API_BASE
+  const res = await fetch(`${base}/api/video-info`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url })
+  })
+  if (!res.ok) throw new Error('Failed to fetch video info')
+  return (await res.json()) as VideoInfo
 }

@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react'
-import { createJob, getJob, JobStatus, toAbsoluteDownloadUrl } from '@/lib/api'
-import { Loader2, Download, Video, Music, ArrowRight, CheckCircle2, XCircle } from 'lucide-react'
+import React, { useMemo, useState, useEffect, useCallback } from 'react'
+import { createJob, getJob, getVideoInfo, JobStatus, VideoInfo, toAbsoluteDownloadUrl } from '@/lib/api'
+import { Loader2, Download, Video, Music, ArrowRight, CheckCircle2, XCircle, Scissors } from 'lucide-react'
+import TimeRangeSlider, { formatTime } from './TimeRangeSlider'
 
 const videoQualities = ['1080p', '720p', '480p', '360p'] as const
-const audioFormats = ['mp3', 'm4a'] as const
+const audioFormats = ['wav', 'mp3', 'm4a'] as const
 
 type Tab = 'video' | 'audio'
 
@@ -11,13 +12,20 @@ export default function DownloaderCard() {
   const [url, setUrl] = useState('')
   const [tab, setTab] = useState<Tab>('video')
   const [quality, setQuality] = useState<typeof videoQualities[number]>('720p')
-  const [audioFormat, setAudioFormat] = useState<typeof audioFormats[number]>('mp3')
+  const [audioFormat, setAudioFormat] = useState<typeof audioFormats[number]>('wav')
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [jobId, setJobId] = useState<string | null>(null)
   const [result, setResult] = useState<JobStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [thumbnail, setThumbnail] = useState<string | null>(null)
+
+  // Time clipping state
+  const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null)
+  const [loadingInfo, setLoadingInfo] = useState(false)
+  const [startSeconds, setStartSeconds] = useState(0)
+  const [endSeconds, setEndSeconds] = useState(0)
+  const [clipEnabled, setClipEnabled] = useState(false)
 
   const canDownload = useMemo(() => {
     return url.trim().length > 0 && !loading
@@ -26,26 +34,26 @@ export default function DownloaderCard() {
   // Extract YouTube video ID from various URL formats
   function extractVideoId(url: string): string | null {
     if (!url) return null
-    
+
     // Remove whitespace
     url = url.trim()
-    
+
     // Regular YouTube URLs: youtube.com/watch?v=VIDEO_ID
     const standardMatch = url.match(/(?:youtube\.com\/watch\?v=)([a-zA-Z0-9_-]{11})/)
     if (standardMatch) return standardMatch[1]
-    
+
     // Short YouTube URLs: youtu.be/VIDEO_ID
     const shortMatch = url.match(/(?:youtu\.be\/)([a-zA-Z0-9_-]{11})/)
     if (shortMatch) return shortMatch[1]
-    
+
     // Embed URLs: youtube.com/embed/VIDEO_ID
     const embedMatch = url.match(/(?:youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/)
     if (embedMatch) return embedMatch[1]
-    
+
     // YouTube shorts: youtube.com/shorts/VIDEO_ID
     const shortsMatch = url.match(/(?:youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/)
     if (shortsMatch) return shortsMatch[1]
-    
+
     return null
   }
 
@@ -66,9 +74,19 @@ export default function DownloaderCard() {
       setError(null)
       setResult(null)
       setProgress(0)
+
+      // Convert seconds to time string format for API
+      const startTimeStr = clipEnabled && startSeconds > 0 ? formatTime(startSeconds) : undefined
+      const endTimeStr = clipEnabled && endSeconds > 0 && endSeconds < (videoInfo?.duration || Infinity) ? formatTime(endSeconds) : undefined
+
+      const basePayload = {
+        url,
+        start_time: startTimeStr,
+        end_time: endTimeStr,
+      }
       const payload = tab === 'video'
-        ? { url, mode: 'video' as const, quality }
-        : { url, mode: 'audio' as const, audio_format: audioFormat }
+        ? { ...basePayload, mode: 'video' as const, quality }
+        : { ...basePayload, mode: 'audio' as const, audio_format: audioFormat }
       const { job_id } = await createJob(payload)
       setJobId(job_id)
       await poll(job_id)
@@ -116,9 +134,9 @@ export default function DownloaderCard() {
         {/* Video Thumbnail Preview */}
         {thumbnail ? (
           <div className="thumbnail-container">
-            <img 
-              src={thumbnail} 
-              alt="Video thumbnail" 
+            <img
+              src={thumbnail}
+              alt="Video thumbnail"
               className="thumbnail-image"
               onError={(e) => {
                 // Fallback to hqdefault if maxresdefault doesn't exist
@@ -175,11 +193,91 @@ export default function DownloaderCard() {
               onChange={e => setAudioFormat(e.target.value as any)}
             >
               {audioFormats.map(f => (
-                <option key={f} value={f}>{f.toUpperCase()} - {f === 'mp3' ? 'Universal' : 'High Quality'}</option>
+                <option key={f} value={f}>{f.toUpperCase()} - {f === 'wav' ? 'Lossless (Best)' : f === 'mp3' ? '320kbps' : '256kbps'}</option>
               ))}
             </select>
           </div>
         )}
+
+        {/* Time Clip Section - Collapsible */}
+        <div className="space-y-4">
+          <button
+            type="button"
+            onClick={async () => {
+              if (!clipEnabled && !videoInfo && url) {
+                // Fetch video info when enabling clip mode
+                setLoadingInfo(true)
+                try {
+                  const info = await getVideoInfo(url)
+                  setVideoInfo(info)
+                  setStartSeconds(0)
+                  setEndSeconds(info.duration)
+                } catch (e) {
+                  console.error('Failed to fetch video info:', e)
+                } finally {
+                  setLoadingInfo(false)
+                }
+              }
+              setClipEnabled(!clipEnabled)
+            }}
+            className={`w-full flex items-center justify-center gap-3 px-6 py-4 rounded-2xl border-2 transition-all duration-300 ${clipEnabled
+              ? 'border-black bg-gray-100 text-gray-900'
+              : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+              }`}
+          >
+            <Scissors className="w-5 h-5" />
+            <span className="font-medium">
+              {clipEnabled ? 'Clip Enabled' : 'Clip Video/Audio'}
+            </span>
+            {loadingInfo && <Loader2 className="w-4 h-4 animate-spin" />}
+          </button>
+
+          {clipEnabled && videoInfo && (
+            <div className="bg-gray-50 rounded-2xl p-6 space-y-6 border border-gray-200">
+              <div className="text-center">
+                <p className="text-sm text-gray-500 mb-1">Video Duration</p>
+                <p className="font-semibold text-gray-900">{formatTime(videoInfo.duration)}</p>
+              </div>
+
+              {/* Slider */}
+              <TimeRangeSlider
+                duration={videoInfo.duration}
+                startTime={startSeconds}
+                endTime={endSeconds}
+                onStartChange={setStartSeconds}
+                onEndChange={setEndSeconds}
+              />
+
+              {/* Fine-tune inputs */}
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Start</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={endSeconds - 1}
+                    className="input-field text-base text-center"
+                    value={startSeconds}
+                    onChange={e => setStartSeconds(Math.max(0, Math.min(endSeconds - 1, parseInt(e.target.value) || 0)))}
+                  />
+                  <p className="text-xs text-gray-400 text-center mt-1">seconds</p>
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">End</label>
+                  <input
+                    type="number"
+                    min={startSeconds + 1}
+                    max={videoInfo.duration}
+                    className="input-field text-base text-center"
+                    value={endSeconds}
+                    onChange={e => setEndSeconds(Math.max(startSeconds + 1, Math.min(videoInfo.duration, parseInt(e.target.value) || 0)))}
+                  />
+                  <p className="text-xs text-gray-400 text-center mt-1">seconds</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Download Button - Prominent */}
         <button
@@ -208,9 +306,9 @@ export default function DownloaderCard() {
               <span className="text-sm font-semibold text-gray-900">{Math.round(progress)}%</span>
             </div>
             <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-              <div 
-                className="progress-bar" 
-                style={{ width: `${Math.round(progress)}%` }} 
+              <div
+                className="progress-bar"
+                style={{ width: `${Math.round(progress)}%` }}
               />
             </div>
           </div>
@@ -232,10 +330,10 @@ export default function DownloaderCard() {
           <div className="success-badge flex flex-col items-center justify-center text-center gap-4">
             <CheckCircle2 className="w-8 h-8 text-green-600" />
             <p className="font-semibold text-gray-900 text-lg">Ready to download</p>
-            <a 
-              className="inline-flex items-center justify-center gap-3 bg-black text-white px-8 py-4 rounded-full font-semibold hover:bg-gray-800 transition-all duration-300 hover:-translate-y-1" 
-              href={toAbsoluteDownloadUrl(result.download_url!)} 
-              target="_blank" 
+            <a
+              className="inline-flex items-center justify-center gap-3 bg-black text-white px-8 py-4 rounded-full font-semibold hover:bg-gray-800 transition-all duration-300 hover:-translate-y-1"
+              href={toAbsoluteDownloadUrl(result.download_url!)}
+              target="_blank"
               rel="noreferrer"
               style={{ boxShadow: '0 4px 16px rgba(0, 0, 0, 0.12)' }}
             >

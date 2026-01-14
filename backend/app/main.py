@@ -2,7 +2,9 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from starlette.staticfiles import StaticFiles
+import yt_dlp
 
 from .jobs import JobManager
 from .schemas import CreateJobRequest, CreateJobResponse, JobStatus
@@ -25,11 +27,41 @@ app.mount("/downloads", StaticFiles(directory=str(DOWNLOADS_DIR)), name="downloa
 job_manager = JobManager(DOWNLOADS_DIR)
 
 
+class VideoInfoRequest(BaseModel):
+	url: str
+
+
+class VideoInfoResponse(BaseModel):
+	title: str
+	duration: int  # in seconds
+	thumbnail: str
+
+
+@app.post("/api/video-info", response_model=VideoInfoResponse)
+async def get_video_info(req: VideoInfoRequest) -> VideoInfoResponse:
+	try:
+		ydl_opts = {
+			"quiet": True,
+			"no_warnings": True,
+			"extract_flat": False,
+			"ffmpeg_location": "C:/ffmpeg/ffmpeg-8.0.1-essentials_build/bin",
+		}
+		with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+			info = ydl.extract_info(req.url, download=False)
+			return VideoInfoResponse(
+				title=info.get("title", "Unknown"),
+				duration=info.get("duration", 0) or 0,
+				thumbnail=info.get("thumbnail", ""),
+			)
+	except Exception as e:
+		raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/api/jobs", response_model=CreateJobResponse)
 async def create_job(req: CreateJobRequest) -> CreateJobResponse:
 	if req.mode == "audio" and not req.audio_format:
 		req.audio_format = "mp3"
-	job_id = job_manager.submit_job(req.url, req.mode, req.quality, req.audio_format)
+	job_id = job_manager.submit_job(req.url, req.mode, req.quality, req.audio_format, req.start_time, req.end_time)
 	return CreateJobResponse(job_id=job_id)
 
 
@@ -39,3 +71,4 @@ async def get_job(job_id: str) -> JobStatus:
 	if not status:
 		raise HTTPException(status_code=404, detail="Job not found")
 	return JobStatus(**status)
+

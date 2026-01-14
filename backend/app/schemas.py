@@ -6,7 +6,9 @@ class CreateJobRequest(BaseModel):
 	url: str
 	mode: Literal["video", "audio"]
 	quality: Optional[str] = None
-	audio_format: Optional[Literal["mp3", "m4a"]] = None
+	audio_format: Optional[Literal["mp3", "m4a", "wav"]] = None
+	start_time: Optional[str] = None  # Format: HH:MM:SS or seconds
+	end_time: Optional[str] = None    # Format: HH:MM:SS or seconds
 
 
 class CreateJobResponse(BaseModel):

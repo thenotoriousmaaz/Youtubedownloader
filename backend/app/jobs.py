@@ -45,12 +45,12 @@ class JobManager:
 		self._executor = ThreadPoolExecutor(max_workers=max_workers)
 		self._jobs_lock = threading.Lock()
 
-	def submit_job(self, url: str, mode: str, quality: Optional[str], audio_format: Optional[str]) -> str:
+	def submit_job(self, url: str, mode: str, quality: Optional[str], audio_format: Optional[str], start_time: Optional[str] = None, end_time: Optional[str] = None) -> str:
 		job_id = str(uuid.uuid4())
 		job = Job(job_id)
 		with self._jobs_lock:
 			self._jobs[job_id] = job
-		self._executor.submit(self._run_download, job, url, mode, quality, audio_format)
+		self._executor.submit(self._run_download, job, url, mode, quality, audio_format, start_time, end_time)
 		return job_id
 
 	def get_status(self, job_id: str) -> Optional[Dict]:
@@ -60,7 +60,7 @@ class JobManager:
 			return None
 		return job.to_dict()
 
-	def _run_download(self, job: Job, url: str, mode: str, quality: Optional[str], audio_format: Optional[str]) -> None:
+	def _run_download(self, job: Job, url: str, mode: str, quality: Optional[str], audio_format: Optional[str], start_time: Optional[str] = None, end_time: Optional[str] = None) -> None:
 		def progress_hook(d):
 			with job._lock:
 				status = d.get("status")
@@ -78,7 +78,7 @@ class JobManager:
 			with job._lock:
 				job.state = JobState.RUNNING
 
-			opts = self._build_ydl_opts(mode, quality, audio_format, progress_hook)
+			opts = self._build_ydl_opts(mode, quality, audio_format, progress_hook, start_time, end_time)
 			with yt_dlp.YoutubeDL(opts) as ydl:
 				info = ydl.extract_info(url, download=True)
 
@@ -102,7 +102,7 @@ class JobManager:
 				job.state = JobState.FAILED
 				job.message = str(exc)
 
-	def _build_ydl_opts(self, mode: str, quality: Optional[str], audio_format: Optional[str], hook):
+	def _build_ydl_opts(self, mode: str, quality: Optional[str], audio_format: Optional[str], hook, start_time: Optional[str] = None, end_time: Optional[str] = None):
 		outtmpl = str(self.downloads_dir / "%(title)s.%(ext)s")
 		postprocessors = []
 		format_selector = None
@@ -122,13 +122,25 @@ class JobManager:
 		else:
 			format_selector = "bestaudio/best"
 			codec = (audio_format or "mp3").lower()
-			postprocessors.append(
-				{
-					"key": "FFmpegExtractAudio",
-					"preferredcodec": codec,
-					"preferredquality": "192",
-				}
-			)
+			# For WAV, we want the highest quality uncompressed audio
+			if codec == "wav":
+				postprocessors.append(
+					{
+						"key": "FFmpegExtractAudio",
+						"preferredcodec": "wav",
+						"preferredquality": "0",  # 0 means best/lossless for wav
+					}
+				)
+			else:
+				# For MP3/M4A, use high bitrate (320kbps for mp3, 256kbps for m4a)
+				quality_map = {"mp3": "320", "m4a": "256"}
+				postprocessors.append(
+					{
+						"key": "FFmpegExtractAudio",
+						"preferredcodec": codec,
+						"preferredquality": quality_map.get(codec, "320"),
+					}
+				)
 			merge_output_format = None
 
 		opts = {
@@ -156,4 +168,34 @@ class JobManager:
 			opts["merge_output_format"] = merge_output_format
 		if self.cookies_file.exists():
 			opts["cookiefile"] = str(self.cookies_file)
+		
+		# Add time-based clipping if start_time or end_time is specified
+		if start_time or end_time:
+			# Convert time strings to seconds
+			def time_to_seconds(t: str) -> float:
+				if not t:
+					return 0.0
+				t = t.strip()
+				# Handle HH:MM:SS or MM:SS or SS format
+				parts = t.split(':')
+				if len(parts) == 3:
+					return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+				elif len(parts) == 2:
+					return float(parts[0]) * 60 + float(parts[1])
+				else:
+					return float(parts[0])
+			
+			start_sec = time_to_seconds(start_time) if start_time else None
+			end_sec = time_to_seconds(end_time) if end_time else None
+			
+			# Use download_ranges for efficient time-based downloading
+			def make_ranges(info_dict, ydl):
+				duration = info_dict.get('duration') or float('inf')
+				start = start_sec if start_sec is not None else 0
+				end = end_sec if end_sec is not None else duration
+				return [(start, end)]
+			
+			opts["download_ranges"] = make_ranges
+			opts["force_keyframes_at_cuts"] = True
+		
 		return opts

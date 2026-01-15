@@ -11,12 +11,12 @@ Professional full‑stack YouTube downloader.
 - Python 3.10+
 - FFmpeg installed and available on PATH (required by yt‑dlp for audio extraction)
 
-### Backend (port 5000)
+### Backend (port 8000)
 1. Create and activate a virtualenv (optional but recommended).
 2. Install dependencies:
    - `pip install -r backend/requirements.txt`
 3. Run the server:
-   - `uvicorn app.main:app --reload --port 5000 --host 0.0.0.0 --app-dir backend`
+   - `uvicorn app.main:app --reload --port 8000 --host 0.0.0.0 --app-dir backend`
 
 Downloads will be saved under `backend/downloads/` and served at `/downloads/<filename>`.
 

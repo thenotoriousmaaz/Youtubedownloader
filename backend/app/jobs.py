@@ -1,4 +1,5 @@
 import threading
+import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -64,6 +65,7 @@ class JobManager:
 		def progress_hook(d):
 			with job._lock:
 				status = d.get("status")
+				print(f"[PROGRESS] status={status}, downloaded={d.get('downloaded_bytes')}, total={d.get('total_bytes')}, est={d.get('total_bytes_estimate')}", flush=True)
 				if status == "downloading":
 					dl = d.get("downloaded_bytes") or 0
 					total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
@@ -75,12 +77,16 @@ class JobManager:
 					job.state = JobState.RUNNING
 
 		try:
+			print(f"[JOB {job.job_id}] Starting download: url={url}, mode={mode}", flush=True)
 			with job._lock:
 				job.state = JobState.RUNNING
 
 			opts = self._build_ydl_opts(mode, quality, audio_format, progress_hook, start_time, end_time)
+			print(f"[JOB {job.job_id}] Built ydl opts, creating YoutubeDL instance...", flush=True)
 			with yt_dlp.YoutubeDL(opts) as ydl:
+				print(f"[JOB {job.job_id}] Calling extract_info...", flush=True)
 				info = ydl.extract_info(url, download=True)
+				print(f"[JOB {job.job_id}] extract_info completed.", flush=True)
 
 				final_path = None
 				requested = info.get("requested_downloads") or []
@@ -92,18 +98,21 @@ class JobManager:
 					final_path = ydl.prepare_filename(info)
 
 				final_path = Path(final_path)
+				print(f"[JOB {job.job_id}] Download completed: {final_path}", flush=True)
 				with job._lock:
 					job.filename = final_path.name
 					job.download_url = f"/downloads/{final_path.name}"
 					job.state = JobState.COMPLETED
 					job.progress = 100.0
 		except Exception as exc:
+			print(f"[JOB {job.job_id}] FAILED: {exc}", flush=True)
+			traceback.print_exc()
 			with job._lock:
 				job.state = JobState.FAILED
 				job.message = str(exc)
 
 	def _build_ydl_opts(self, mode: str, quality: Optional[str], audio_format: Optional[str], hook, start_time: Optional[str] = None, end_time: Optional[str] = None):
-		outtmpl = str(self.downloads_dir / "%(title)s.%(ext)s")
+		outtmpl = str(self.downloads_dir / "%(title)s.%(ext)s").replace("\\", "/")
 		postprocessors = []
 		format_selector = None
 
@@ -152,15 +161,9 @@ class JobManager:
 			"noplaylist": True,
 			"retries": 5,
 			"fragment_retries": 5,
+			"windowsfilenames": True,
+			"overwrites": True,
 			"ffmpeg_location": "C:/Users/PC/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.0.1-full_build/bin",
-			"http_headers": {
-				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-				"Accept-Language": "en-US,en;q=0.9",
-				"Referer": "https://www.youtube.com/",
-			},
-			"extractor_args": {
-				"youtube": {"player_client": ["android"]}
-			},
 		}
 		if postprocessors:
 			opts["postprocessors"] = postprocessors

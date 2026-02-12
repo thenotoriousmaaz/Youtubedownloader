@@ -44,7 +44,7 @@ async def get_video_info(req: VideoInfoRequest) -> VideoInfoResponse:
 			"quiet": True,
 			"no_warnings": True,
 			"extract_flat": False,
-			"ffmpeg_location": "C:/ffmpeg/ffmpeg-8.0.1-essentials_build/bin",
+			"ffmpeg_location": "C:/Users/PC/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.0.1-full_build/bin",
 		}
 		with yt_dlp.YoutubeDL(ydl_opts) as ydl:
 			info = ydl.extract_info(req.url, download=False)
